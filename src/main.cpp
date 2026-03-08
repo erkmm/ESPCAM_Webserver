@@ -1,200 +1,147 @@
 #include <Arduino.h>
-/*
-void setup() {
-pinMode(33, OUTPUT); 
-}
-void loop() {
-digitalWrite(33, HIGH); //LED'i aç
-delay (1000); //1 saniye bekle
-digitalWrite(33, LOW); //LED'i kapat
-delay (1000); //1 saniye bekle
-}*/
-
-
-//--------------------------------------------------------------------------------
-// AI Thinker ESP32-CAM
-
-#include "esp_camera.h"
 #include <WiFi.h>
-#include "esp_timer.h"
-#include "img_converters.h"
-#include "Arduino.h"
-#include "fb_gfx.h"
-#include "soc/soc.h" 
-#include "soc/rtc_cntl_reg.h"  
-#include "esp_http_server.h"
+#include <WebServer.h>
+#include <AViShaESPCam.h>
 
-const char* ssid      = "Kamera";
-const char* password  = "123456789";
+AViShaESPCam espcam;
 
-#define PART_BOUNDARY "123456789000000000000987654321"
-#define CAMERA_MODEL_AI_THINKER
+const char* ssid = "FiberHGW_ZTF7ZQ_2.4GHz";
+const char* password = "4Yax4c9zxKNH";
 
-#if defined(CAMERA_MODEL_AI_THINKER)
-  #define PWDN_GPIO_NUM     32
-  #define RESET_GPIO_NUM    -1
-  #define XCLK_GPIO_NUM      0
-  #define SIOD_GPIO_NUM     26
-  #define SIOC_GPIO_NUM     27
-  
-  #define Y9_GPIO_NUM       35
-  #define Y8_GPIO_NUM       34
-  #define Y7_GPIO_NUM       39
-  #define Y6_GPIO_NUM       36
-  #define Y5_GPIO_NUM       21
-  #define Y4_GPIO_NUM       19
-  #define Y3_GPIO_NUM       18
-  #define Y2_GPIO_NUM        5
-  #define VSYNC_GPIO_NUM    25
-  #define HREF_GPIO_NUM     23
-  #define PCLK_GPIO_NUM     22
-#else
-  #error "Camera model not selected"
-#endif
+WebServer server(80);
 
-static const char* _STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
-static const char* _STREAM_BOUNDARY     = "\r\n--" PART_BOUNDARY "\r\n";
-static const char* _STREAM_PART         = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
+// HTML sayfası
+const char* htmlPage = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hello OpenCV.js</title>
+</head>
+<body>
+<h2>Hello OpenCV.js</h2>
+<p id="status">OpenCV.js is loading...</p>
+<div>
+  <div class="inputoutput">
+    <canvas id="cameraCanvas" width="320" height="240"></canvas>
+    <div class="caption">cameraCanvas</div>
+  </div>
+  <div id="result"></div>
+</div>
+<!-- Fazladan bir </div> kaldırıldı -->
+<script async src="https://docs.opencv.org/3.4.0/opencv.js" type="text/javascript"></script>
+<script  type="text/javascript">
+   
+    // var cv; // Bu satıra gerek yok, çünkü OpenCV.js cv'yi globalde oluşturur.
 
-httpd_handle_t stream_httpd = NULL;
+    function fetchImage() {
+        fetch('/image')
+            .then(response => response.text())
+            .then(data => {
+                const img = new Image();
+                img.src = data;
+                img.onload = () => {
+                    // Canvas'tan alınan ImageData'yı OpenCV Mat formatına dönüştür
+                    const src = cv.imread(img);
 
-static esp_err_t stream_handler(httpd_req_t *req){
-  camera_fb_t * fb           = NULL;
-  esp_err_t     res          = ESP_OK;
-  size_t        _jpg_buf_len = 0;
-  uint8_t *     _jpg_buf     = NULL;
-  char *        part_buf[64];
+                    let matC3 = new cv.Mat(src.rows, src.cols, cv.CV_8UC3);
+                    cv.cvtColor(src, matC3, cv.RGBA2GRAY);
 
-  res = httpd_resp_set_type(req, _STREAM_CONTENT_TYPE);
-  if(res != ESP_OK){
-    return res;
-  }
+                    let kernel = cv.Mat.ones(5, 5, cv.CV_32F);
+                    let scalar = new cv.Scalar(1.0 / 25.0);
+                    cv.multiply(kernel, scalar, kernel);  // normalize
 
-  while(true){
-    fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      res = ESP_FAIL;
-    } else {
-      if(fb->width > 400){
-        if(fb->format != PIXFORMAT_JPEG){
-          bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
-          esp_camera_fb_return(fb);
-          fb = NULL;
-          if(!jpeg_converted){
-            Serial.println("JPEG compression failed");
-            res = ESP_FAIL;
-          }
-        } else {  
-          _jpg_buf_len  = fb->len;
-          _jpg_buf      = fb->buf;
+                    let anchor = new cv.Point(-1, -1);
+                    cv.filter2D(gray, matC3, -1, kernel, anchor, 0, cv.BORDER_DEFAULT);
+
+                    // Temizle
+                    // İşlenmiş görüntüyü canvas'a geri yükle
+                    cv.imshow('cameraCanvas', gray);
+
+                    // Belleği temizle
+                    kernel.delete();
+                    src.delete();
+                    matC3.delete();
+                };
+                img.onerror = () => {
+                    console.error("Failed to load image");
+                };
+            
+            })
+            .catch(error => console.error('Error fetching image:', error));
+    }
+
+    var Module = {
+        onRuntimeInitialized() {
+            document.getElementById('status').innerHTML = 'OpenCV.js is ready.';
+            setInterval(fetchImage, 1000);
         }
-      }
-    }
-    if(res == ESP_OK){
-      size_t hlen = snprintf((char *)part_buf, 64, _STREAM_PART, _jpg_buf_len);
-      res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
-    }
-    if(res == ESP_OK){
-      res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
-    }
-    if(res == ESP_OK){
-      res = httpd_resp_send_chunk(req, _STREAM_BOUNDARY, strlen(_STREAM_BOUNDARY));
-    } 
-    if(fb){
-      esp_camera_fb_return(fb);
-      fb = NULL;
-      _jpg_buf = NULL;
-    } else if(_jpg_buf){
-      free(_jpg_buf);
-      _jpg_buf = NULL;
-    }
-    if(res != ESP_OK){
-      break;
-    }
-    //Serial.printf("MJPG: %uB\n",(uint32_t)(_jpg_buf_len));
-  }
-  return res;
+    };
+
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+// Ana sayfayı gönder
+void handleRoot() {
+  server.send(200, "text/html", htmlPage);
 }
 
-void startCameraServer(){
-  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.server_port    = 80;
-
-  httpd_uri_t index_uri = {
-    .uri       = "/",
-    .method    = HTTP_GET,
-    .handler   = stream_handler,
-    .user_ctx  = NULL
-  };
-  
-  //Serial.printf("Starting web server on port: '%d'\n", config.server_port);
-  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_register_uri_handler(stream_httpd, &index_uri);
+// Görüntüyü Base64 olarak gönder
+// Görüntüyü Base64 olarak gönder
+void handleImageRequest() {
+  FrameBuffer* frame = espcam.capture();
+  if (frame) {
+    String base64Image = "data:image/jpeg;base64,";
+    base64Image += espcam.frameToBase64(frame);
+    server.send(200, "text/plain", base64Image);
+    espcam.returnFrame(frame);
+  } else {
+    server.send(500, "text/plain", "Failed to capture image");
   }
+}
+
+// Favicon için
+void handleFavicon() {
+  server.send(204, "image/x-icon", "");
 }
 
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
- 
   Serial.begin(115200);
-  Serial.setDebugOutput(false);
-  pinMode(33, OUTPUT); 
-
-  camera_config_t config;
-  config.ledc_channel = LEDC_CHANNEL_0;
-  config.ledc_timer   = LEDC_TIMER_0;
-  config.pin_d0       = Y2_GPIO_NUM;
-  config.pin_d1       = Y3_GPIO_NUM;
-  config.pin_d2       = Y4_GPIO_NUM;
-  config.pin_d3       = Y5_GPIO_NUM;
-  config.pin_d4       = Y6_GPIO_NUM;
-  config.pin_d5       = Y7_GPIO_NUM;
-  config.pin_d6       = Y8_GPIO_NUM;
-  config.pin_d7       = Y9_GPIO_NUM;
-  config.pin_xclk     = XCLK_GPIO_NUM;
-  config.pin_pclk     = PCLK_GPIO_NUM;
-  config.pin_vsync    = VSYNC_GPIO_NUM;
-  config.pin_href     = HREF_GPIO_NUM;
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
-  config.pin_pwdn     = PWDN_GPIO_NUM;
-  config.pin_reset    = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG; 
   
-  if(psramFound()){
-    config.frame_size   = FRAMESIZE_UXGA;
-    config.jpeg_quality = 10;
-    config.fb_count     = 2;
-  } else {
-    config.frame_size   = FRAMESIZE_SVGA;
-    config.jpeg_quality = 12;
-    config.fb_count     = 1;
+  // Kamera başlatma
+  espcam.enableLogging(true);
+  if (!espcam.init(AI_THINKER(), QVGA)) {
+    Serial.println("Camera init failed");
+    // Hata durumunda işlem yap
+    while (true) {
+      delay(1000);
+      Serial.println("Camera init failed, retrying...");
+      // Yeniden deneyebilirsiniz, ancak döngüye girmemek için bir kaç deneme yapıp durmak isteyebilirsiniz.
+    }
   }
-  
-  // Camera init
-  esp_err_t err = esp_camera_init(&config);
-  if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
-    return;
+  Serial.println("Camera initialized");
+
+  // WiFi bağlantısı
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
   }
-  // Wi-Fi connection
-  Serial.print("Setting AP (Access Point)…");
-  // Remove the password parameter, if you want the AP (Access Point) to be open
-  WiFi.softAP(ssid, password);
+  Serial.println("Connected to WiFi");
+  Serial.println(WiFi.localIP()); // ESP32'nin IP adresini yazdır
 
-  IPAddress IP = WiFi.softAPIP();
+  // Web sunucusu rotaları
+  server.on("/", HTTP_GET, handleRoot); // Ana sayfa
+  server.on("/image", HTTP_GET, handleImageRequest); // Görüntü isteği
+  server.on("/favicon.ico", HTTP_GET, handleFavicon); // Favicon
 
-  Serial.print("AP IP address: ");
-  Serial.println(IP);
-  
-  // Start streaming web server
-  startCameraServer();
+  server.begin();
+  Serial.println("HTTP server started");
 }
 
 void loop() {
-  digitalWrite(33, HIGH); //LED'i aç
-  delay(1000);
-  digitalWrite(33, LOW); //LED'i kapat
+  server.handleClient(); // İstemci isteklerini işle
 }
