@@ -45,21 +45,12 @@ const char* htmlPage = R"rawliteral(
                     const src = cv.imread(img);
 
                     let matC3 = new cv.Mat(src.rows, src.cols, cv.CV_8UC3);
-                    cv.cvtColor(src, matC3, cv.RGBA2GRAY);
+                    cv.cvtColor(src, matC3, cv.COLOR_RGBA2GRAY);
 
-                    let kernel = cv.Mat.ones(5, 5, cv.CV_32F);
-                    let scalar = new cv.Scalar(1.0 / 25.0);
-                    cv.multiply(kernel, scalar, kernel);  // normalize
-
-                    let anchor = new cv.Point(-1, -1);
-                    cv.filter2D(gray, matC3, -1, kernel, anchor, 0, cv.BORDER_DEFAULT);
-
-                    // Temizle
                     // İşlenmiş görüntüyü canvas'a geri yükle
-                    cv.imshow('cameraCanvas', gray);
+                    cv.imshow('cameraCanvas', matC3);
 
                     // Belleği temizle
-                    kernel.delete();
                     src.delete();
                     matC3.delete();
                 };
