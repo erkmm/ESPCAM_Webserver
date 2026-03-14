@@ -72,10 +72,20 @@ const char* htmlPage = R"rawliteral(
                     let lowpassfiltered = new cv.Mat();
                     cv.filter2D(gray, lowpassfiltered, -1, lowKernel, anchor, 0, cv.BORDER_DEFAULT);
 
-                    // High pass filter - laplacian-like kernel (all -1, center = 24-7 = 17)
-                    let highKernel = cv.Mat.ones(5, 5, cv.CV_32F);
-                    highKernel.convertTo(highKernel, cv.CV_32F, -1.0);
-                    highKernel.floatPtr(2, 2)[0] = 17.0;
+                    let highKernelData = new Float32Array([
+                        0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+                        0,  -0.3, -0.3, -0.3, -0.3, -0.3, -0.3, -0.3, -0.3, -0.3,     0,
+                        0,  -0.3, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.3,     0,
+                        0,  -0.3, -0.5, -0.8, -0.8, -0.8, -0.8, -0.8, -0.5, -0.3,     0,
+                        0,  -0.3, -0.5, -0.8, -1.0, -1.0, -1.0, -0.8, -0.5, -0.3,     0,
+                        0,  -0.3, -0.5, -0.8, -1.0, 24.0, -1.0, -0.8, -0.5, -0.3,     0,
+                        0,  -0.3, -0.5, -0.8, -1.0, -1.0, -1.0, -0.8, -0.5, -0.3,     0,
+                        0,  -0.3, -0.5, -0.8, -0.8, -0.8, -0.8, -0.8, -0.5, -0.3,     0,
+                        0,  -0.3, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.3,     0,
+                        0,  -0.3, -0.3, -0.3, -0.3, -0.3, -0.3, -0.3, -0.3, -0.3,     0,
+                        0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+                    ]);
+                    let highKernel = cv.matFromArray(11, 11, cv.CV_32F, highKernelData);
                     let highpassfiltered = new cv.Mat();
                     cv.filter2D(gray, highpassfiltered, -1, highKernel, anchor, 0, cv.BORDER_DEFAULT);
 
